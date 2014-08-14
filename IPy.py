@@ -135,7 +135,7 @@ class IPint(object):
     Use class IP instead because some features are not implemented for
     IPint."""
 
-    def __init__(self, data, ipversion=0, make_net=0):
+    def __init__(self, data, ipversion=0, make_net=0, strict=True):
         """Create an instance of an IP object.
 
         Data can be a network specification or a single IP. IP
@@ -163,6 +163,9 @@ class IPint(object):
 
         See module documentation for more examples.
         """
+
+        # Whether to skip _checkNetaddrWorksWithPrefixlen checks.
+        self.strict = strict
 
         # Print no Prefixlen for /32 and /128
         self.NoPrefixForSingleIp = 1
@@ -254,8 +257,9 @@ class IPint(object):
             if make_net:
                 self.ip = self.ip & _prefixlenToNetmask(self._prefixlen, self._ipversion)
 
-            if not _checkNetaddrWorksWithPrefixlen(self.ip,
-            self._prefixlen, self._ipversion):
+            if self.strict and not _checkNetaddrWorksWithPrefixlen(self.ip,
+                                                                   self._prefixlen,
+                                                                   self._ipversion):
                 raise ValueError("%s has invalid prefix length (%s)" % (repr(self), self._prefixlen))
         else:
             raise TypeError("Unsupported data type: %s" % type(data))
@@ -583,16 +587,17 @@ class IPint(object):
             raise ValueError("Only adjacent networks can be added together.")
         ret = IP(self.int(), ipversion=self._ipversion)
         ret._prefixlen = self.prefixlen() - 1
-        if not _checkNetaddrWorksWithPrefixlen(ret.ip, ret._prefixlen,
-                                               ret._ipversion):
+        if self.strict and not _checkNetaddrWorksWithPrefixlen(ret.ip,
+                                                               ret._prefixlen,
+                                                               ret._ipversion):
             raise ValueError("The resulting %s has invalid prefix length (%s)"
                              % (repr(ret), ret._prefixlen))
         return ret
 
     def __sub__(self, other):
         """Return the prefixes that are in this IP but not in the other"""
-        return _remove_subprefix(self, other)                
-        
+        return _remove_subprefix(self, other)
+
     def __getitem__(self, key):
         """Called to implement evaluation of self[key].
 
@@ -707,16 +712,16 @@ class IPint(object):
 
         Should return a negative integer if self < other, zero if self
         == other, a positive integer if self > other.
-        
+
         Order is first determined by the address family. IPv4 addresses
         are always smaller than IPv6 addresses:
-        
+
         >>> IP('10.0.0.0') < IP('2001:db8::')
         1
-        
+
         Then the first address is compared. Lower addresses are
         always smaller:
-        
+
         >>> IP('10.0.0.0') > IP('10.0.0.1')
         0
         >>> IP('10.0.0.0/24') > IP('10.0.0.1')
@@ -727,10 +732,10 @@ class IPint(object):
         1
         >>> IP('10.0.1.0/24') > IP('10.0.0.0')
         1
-        
+
         Then the prefix length is compared. Shorter prefixes are
         considered smaller than longer prefixes:
-        
+
         >>> IP('10.0.0.0/24') > IP('10.0.0.0')
         0
         >>> IP('10.0.0.0/24') > IP('10.0.0.0/25')
@@ -741,19 +746,19 @@ class IPint(object):
         """
         if not isinstance(other, IPint):
             raise TypeError
-        
+
         # Lower version -> lower result
         if self._ipversion != other._ipversion:
             return self._ipversion < other._ipversion and -1 or 1
-        
+
         # Lower start address -> lower result
         if self.ip != other.ip:
             return self.ip < other.ip and -1 or 1
-        
+
         # Shorter prefix length -> lower result
         if self._prefixlen != other._prefixlen:
             return self._prefixlen < other._prefixlen and -1 or 1
-            
+
         # No differences found
         return 0
 
@@ -1007,7 +1012,7 @@ class IP(IPint):
         IP('192.168.1.1')
         """
         if self._ipversion == 4:
-            return IP(str(IPV6_MAP_MASK + self.ip) + 
+            return IP(str(IPV6_MAP_MASK + self.ip) +
                           "/%s" % (self._prefixlen + 96))
         else:
             if self.ip & IPV6_TEST_MAP == IPV6_MAP_MASK:
@@ -1021,16 +1026,16 @@ class IPSet(collections.MutableSet):
         # Make sure it's iterable, otherwise wrap
         if not isinstance(iterable, collections.Iterable):
             raise TypeError("'%s' object is not iterable" % type(iterable).__name__)
-        
+
         # Make sure we only accept IP objects
         for prefix in iterable:
             if not isinstance(prefix, IP):
                 raise ValueError('Only IP objects can be added to an IPSet')
-            
+
         # Store and optimize
         self.prefixes = iterable[:]
         self.optimize()
-            
+
     def __contains__(self, ip):
         valid_masks = self.prefixtable.keys()
         if isinstance(ip, IP):
@@ -1049,22 +1054,22 @@ class IPSet(collections.MutableSet):
     def __iter__(self):
         for prefix in self.prefixes:
             yield prefix
-    
+
     def __len__(self):
         return self.len()
-    
+
     def __add__(self, other):
         return IPSet(self.prefixes + other.prefixes)
-    
+
     def __sub__(self, other):
         new = IPSet(self.prefixes)
         for prefix in other:
             new.discard(prefix)
         return new
-    
+
     def __repr__(self):
         return '%s([' % self.__class__.__name__ + ', '.join(map(repr, self.prefixes)) + '])'
-    
+
     def len(self):
         return sum(prefix.len() for prefix in self.prefixes)
 
@@ -1072,21 +1077,21 @@ class IPSet(collections.MutableSet):
         # Make sure it's iterable, otherwise wrap
         if not isinstance(value, collections.Iterable):
             value = [value]
-        
+
         # Check type
         for prefix in value:
             if not isinstance(prefix, IP):
                 raise ValueError('Only IP objects can be added to an IPSet')
-        
+
         # Append and optimize
         self.prefixes.extend(value)
         self.optimize()
-    
+
     def discard(self, value):
         # Make sure it's iterable, otherwise wrap
         if not isinstance(value, collections.Iterable):
             value = [value]
-            
+
         # This is much faster than iterating over the addresses
         if isinstance(value, IPSet):
             value = value.prefixes
@@ -1095,7 +1100,7 @@ class IPSet(collections.MutableSet):
         for del_prefix in value:
             if not isinstance(del_prefix, IP):
                 raise ValueError('Only IP objects can be removed from an IPSet')
-            
+
             # First check if this prefix contains anything in our list
             found = False
             d = 0
@@ -1104,19 +1109,19 @@ class IPSet(collections.MutableSet):
                     self.prefixes.pop(i - d)
                     d = d + 1
                     found = True
-                
+
             if found:
                 # If the prefix was bigger than an existing prefix, then it's
                 # certainly not a subset of one, so skip the rest
                 continue
-            
+
             # Maybe one of our prefixes contains this prefix
             found = False
             for i in range(len(self.prefixes)):
                 if del_prefix in self.prefixes[i]:
                     self.prefixes[i:i+1] = self.prefixes[i] - del_prefix
                     break
-                
+
         self.optimize()
 
     def optimize(self):
@@ -1134,17 +1139,17 @@ class IPSet(collections.MutableSet):
                 # Mark for deletion by overwriting with None
                 self.prefixes[j] = None
                 j += 1
-            
+
             # Continue where we left off
             i = j
-            
+
         # Try to merge as many prefixes as possible
         run_again = True
         while run_again:
             # Filter None values. This happens when a subset is eliminated
             # above, or when two prefixes are merged below
             self.prefixes = [a for a in self.prefixes if a is not None]
-        
+
             # We'll set run_again to True when we make changes that require
             # re-evaluation of the whole list
             run_again = False
@@ -1155,7 +1160,7 @@ class IPSet(collections.MutableSet):
             i = 0
             while i < addrlen-1:
                 j = i + 1
-                
+
                 try:
                     # The next line will throw an exception when merging
                     # is not possible
@@ -1588,11 +1593,11 @@ def _remove_subprefix(prefix, subprefix):
     if prefix in subprefix:
         # Nothing left
         return IPSet()
-    
+
     if subprefix not in prefix:
         # That prefix isn't even in here
         return IPSet([IP(prefix)])
-    
+
     # Start cutting in half, recursively
     prefixes = [
         IP('%s/%d' % (prefix[0], prefix._prefixlen + 1)),
